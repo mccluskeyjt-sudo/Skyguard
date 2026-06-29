@@ -7,7 +7,10 @@ export async function GET(request: NextRequest) {
   try {
     const res = await fetch(
       `https://api.planespotters.net/pub/photos/reg/${reg}`,
-      { headers: { 'User-Agent': 'SkyGuard/1.0 (+mccluskeyjt@gmail.com)' } }
+      {
+        headers: { 'User-Agent': 'SkyGuard/1.0 (+mccluskeyjt@gmail.com)' },
+        signal: AbortSignal.timeout(5000),
+      }
     )
     if (!res.ok) return NextResponse.json({ photo: null })
     const data = await res.json()
