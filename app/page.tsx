@@ -19,6 +19,13 @@ interface Recommendation {
   upstreamImpact: string | null
   weatherImpact: string | null
   airportAlerts: string | null
+  walkingMinutes: number | null
+}
+
+interface LeaveBy {
+  time: string
+  walkMins: number
+  tsaMins: number
 }
 
 interface FlightResult {
@@ -288,7 +295,41 @@ function FlightPath({ status, timing, result }: {
   )
 }
 
-function RiskCard({ rec, status }: { rec: Recommendation; status: string }) {
+function LeaveByBlock({ leaveBy, timeColor, borderColor, labelColor, breakdownColor }: {
+  leaveBy: LeaveBy
+  timeColor: string
+  borderColor: string
+  labelColor: string
+  breakdownColor: string
+}) {
+  return (
+    <div style={{
+      borderTop: `1px solid ${borderColor}`,
+      borderBottom: `1px solid ${borderColor}`,
+      padding: '10px 0',
+      margin: '12px 0',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    }}>
+      <div>
+        <p style={{ fontSize: '11px', color: labelColor, margin: '0 0 2px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Leave by
+        </p>
+        <p style={{ fontSize: '28px', fontWeight: 900, color: timeColor, margin: 0, lineHeight: 1 }}>
+          {leaveBy.time}
+        </p>
+      </div>
+      <p style={{ fontSize: '10px', color: breakdownColor, margin: 0, textAlign: 'right', lineHeight: 1.6 }}>
+        30 min check-in<br />
+        {leaveBy.tsaMins}m security<br />
+        {leaveBy.walkMins}m to gate
+      </p>
+    </div>
+  )
+}
+
+function RiskCard({ rec, status, leaveBy }: { rec: Recommendation; status: string; leaveBy: LeaveBy | null }) {
   const headline = getVerdictHeadline(rec.riskLevel, status)
 
   if (rec.riskLevel === 'high') {
@@ -309,7 +350,16 @@ function RiskCard({ rec, status }: { rec: Recommendation; status: string }) {
               </div>
             </div>
           </div>
-          <p className="text-red-50 text-sm leading-relaxed mb-4">{rec.summary}</p>
+          <p className="text-red-50 text-sm leading-relaxed">{rec.summary}</p>
+          {leaveBy && (
+            <LeaveByBlock
+              leaveBy={leaveBy}
+              timeColor="white"
+              borderColor="rgba(255,255,255,0.2)"
+              labelColor="rgba(255,200,200,0.7)"
+              breakdownColor="rgba(255,200,200,0.5)"
+            />
+          )}
           <div className="space-y-2">
             {rec.actions.map((action, i) => (
               <div key={i} className="flex items-start gap-3 bg-white/10 rounded-xl px-3 py-2">
@@ -358,6 +408,15 @@ function RiskCard({ rec, status }: { rec: Recommendation; status: string }) {
             </div>
           </div>
         </div>
+        {leaveBy && (
+          <LeaveByBlock
+            leaveBy={leaveBy}
+            timeColor="#F59E0B"
+            borderColor="rgba(245,158,11,0.15)"
+            labelColor="#7A5A20"
+            breakdownColor="#7A5A20"
+          />
+        )}
         <div style={{ borderTop: '1px solid rgba(245,158,11,0.15)', paddingTop: '10px' }}>
           {rec.actions.map((action, i) => (
             <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '6px' }}>
@@ -401,6 +460,15 @@ function RiskCard({ rec, status }: { rec: Recommendation; status: string }) {
           </div>
         </div>
       </div>
+      {leaveBy && (
+        <LeaveByBlock
+          leaveBy={leaveBy}
+          timeColor="#10B981"
+          borderColor="rgba(16,185,129,0.15)"
+          labelColor="#4A8066"
+          breakdownColor="#4A8066"
+        />
+      )}
       <div style={{ borderTop: '1px solid rgba(16,185,129,0.15)', paddingTop: '10px' }}>
         {rec.actions.map((action, i) => (
           <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '6px' }}>
@@ -666,6 +734,23 @@ export default function Home() {
       ? tsaData.preCheckMinutes
       : tsaData.waitMinutes
 
+  const leaveByInfo: LeaveBy | null = (() => {
+    const iso = result?.timing?.departure?.scheduledISO
+    if (!iso || !result) return null
+    const depMs = new Date(iso).getTime()
+    if (isNaN(depMs) || depMs < Date.now()) return null
+    const walkMins = result.recommendation.walkingMinutes ?? 10
+    const tsaMins = displayedWait ?? 20
+    const totalMins = walkMins + tsaMins + 30
+    const leaveMs = depMs - totalMins * 60000
+    if (leaveMs < Date.now()) return null
+    return {
+      time: new Date(leaveMs).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+      walkMins,
+      tsaMins,
+    }
+  })()
+
   return (
     <main className="min-h-screen bg-slate-950 py-12 px-4">
       <div className="max-w-lg mx-auto">
@@ -780,7 +865,7 @@ export default function Home() {
             )}
 
             {/* CHANGE 1 + 2: RiskCard first */}
-            <RiskCard rec={rec} status={result.derivedStatus ?? f.status ?? ''} />
+            <RiskCard rec={rec} status={result.derivedStatus ?? f.status ?? ''} leaveBy={leaveByInfo} />
 
             {/* Flight card */}
             <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">

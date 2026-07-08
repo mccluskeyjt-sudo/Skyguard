@@ -3,7 +3,7 @@
 ## Do now
 - [x] Remove "Live monitoring active" misleading text
 - [x] FAA endpoint graceful fallback when site returns HTML instead of JSON
-- [ ] Verify leave by time is calculating correctly and is visually prominent
+- [x] Verify leave by time is calculating correctly and is visually prominent
 - [ ] Complete plain English language pass throughout UI
 
 ## Up next
