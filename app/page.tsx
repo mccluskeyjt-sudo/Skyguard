@@ -319,9 +319,8 @@ function RiskCard({ rec, status }: { rec: Recommendation; status: string }) {
             ))}
           </div>
         </div>
-        <div className="bg-red-700/90 px-5 py-2 flex items-center justify-between">
-          <span className="text-red-200 text-xs">Verify with your airline</span>
-          <span className="text-red-300 text-xs animate-pulse">Live monitoring active</span>
+        <div className="bg-red-700/90 px-5 py-2">
+          <span className="text-red-200 text-xs">Verify directly with your airline before heading to the airport</span>
         </div>
       </div>
     )

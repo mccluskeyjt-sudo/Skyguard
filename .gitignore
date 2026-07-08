@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# gh cli installers
+gh_*.zip
+gh_*.tar.gz
+gh_*.deb
+gh_*.rpm
+gh_*.pkg
+gh_*.msi
+gh_*_checksums.txt

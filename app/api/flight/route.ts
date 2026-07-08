@@ -98,9 +98,20 @@ async function fetchFAAForAirport(iata: string): Promise<{ hasAlert: boolean; st
       next: { revalidate: 300 },
     } as RequestInit)
     if (!res.ok) return none
-    const data = await res.json()
+    const text = await res.text()
+    if (!text || text.trim().startsWith('<') || text.includes('Website Unavailable')) {
+      console.error('[SkyGuard] FAA endpoint returned HTML instead of JSON, skipping')
+      return { hasAlert: false, status: 'FAA status temporarily unavailable' }
+    }
+    const data = JSON.parse(text)
     if (!Array.isArray(data)) return none
-    const match = data.find((d: any) => (d.ARPT ?? d.airport ?? '').toUpperCase() === iata.toUpperCase())
+    const delays = data as any[]
+    const iataUpper = iata.toUpperCase()
+    const icaoUpper = 'K' + iataUpper
+    const match = delays.find((d: any) => {
+      const code = (d.ARPT ?? d.airport ?? d.facility ?? '').toUpperCase().trim()
+      return code === iataUpper || code === icaoUpper
+    })
     if (!match) return none
     const type   = match.Type   ?? match.type   ?? 'Delay'
     const reason = match.Reason ?? match.reason ?? ''
