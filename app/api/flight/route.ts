@@ -91,38 +91,75 @@ async function fetchAircraftSchedule(reg: string, date: string): Promise<any[]> 
 async function fetchFAAForAirport(iata: string): Promise<{ hasAlert: boolean; status: string }> {
   const none = { hasAlert: false, status: 'No active delays' }
   if (!iata) return none
+  const iataUpper = iata.toUpperCase()
+
+  // Endpoint 1 — FAA ASWS API (authoritative, per-airport)
+  try {
+    const res = await fetch(`https://soa.smext.faa.gov/asws/api/airport/status/${iataUpper}`, {
+      headers: { 'User-Agent': 'SkyGuard/1.0', Accept: 'application/json' },
+      signal: AbortSignal.timeout(5000),
+      next: { revalidate: 300 },
+    } as RequestInit)
+    if (res.ok) {
+      const text = await res.text()
+      if (text && !text.trim().startsWith('<')) {
+        const data = JSON.parse(text)
+        if (data?.SupportedAirport === false) {
+          // Airport not in FAA system — skip to fallback
+        } else if (!data?.Delay || !Array.isArray(data?.Status) || data.Status.length === 0) {
+          return none
+        } else {
+          const s = data.Status[0]
+          const type   = s.Type     ?? 'Delay'
+          const reason = s.Reason   ?? ''
+          const avg    = s.AvgDelay ?? ''
+          return {
+            hasAlert: true,
+            status: `${type}${reason ? ' — ' + reason : ''}${avg ? ' (avg ' + avg + ')' : ''}`,
+          }
+        }
+      }
+    }
+  } catch {
+    // fall through to endpoint 2
+  }
+
+  // Endpoint 2 — nasstatus bulk list (existing fallback)
   try {
     const res = await fetch('https://nasstatus.faa.gov/api/airport-delay-info', {
       headers: { 'User-Agent': 'SkyGuard/1.0', Accept: 'application/json' },
       signal: AbortSignal.timeout(5000),
       next: { revalidate: 300 },
     } as RequestInit)
-    if (!res.ok) return none
-    const text = await res.text()
-    if (!text || text.trim().startsWith('<') || text.includes('Website Unavailable')) {
-      console.error('[SkyGuard] FAA endpoint returned HTML instead of JSON, skipping')
-      return { hasAlert: false, status: 'FAA status temporarily unavailable' }
-    }
-    const data = JSON.parse(text)
-    if (!Array.isArray(data)) return none
-    const delays = data as any[]
-    const iataUpper = iata.toUpperCase()
-    const icaoUpper = 'K' + iataUpper
-    const match = delays.find((d: any) => {
-      const code = (d.ARPT ?? d.airport ?? d.facility ?? '').toUpperCase().trim()
-      return code === iataUpper || code === icaoUpper
-    })
-    if (!match) return none
-    const type   = match.Type   ?? match.type   ?? 'Delay'
-    const reason = match.Reason ?? match.reason ?? ''
-    const avg    = match.Avg    ?? match.avgDelay ?? ''
-    return {
-      hasAlert: true,
-      status: `${type}${reason ? ' - ' + reason : ''}${avg ? ' (avg ' + avg + ')' : ''}`,
+    if (res.ok) {
+      const text = await res.text()
+      if (text && !text.trim().startsWith('<') && !text.includes('Website Unavailable')) {
+        const data = JSON.parse(text)
+        if (Array.isArray(data)) {
+          const icaoUpper = 'K' + iataUpper
+          const match = (data as any[]).find((d: any) => {
+            const code = (d.ARPT ?? d.airport ?? d.facility ?? '').toUpperCase().trim()
+            return code === iataUpper || code === icaoUpper
+          })
+          if (match) {
+            const type   = match.Type   ?? match.type   ?? 'Delay'
+            const reason = match.Reason ?? match.reason ?? ''
+            const avg    = match.Avg    ?? match.avgDelay ?? ''
+            return {
+              hasAlert: true,
+              status: `${type}${reason ? ' — ' + reason : ''}${avg ? ' (avg ' + avg + ')' : ''}`,
+            }
+          }
+          return none
+        }
+      }
     }
   } catch {
-    return none
+    // fall through to final fallback
   }
+
+  // Endpoint 3 — both sources failed
+  return { hasAlert: false, status: 'Airport status temporarily unavailable' }
 }
 
 async function fetchWeather(lat: number, lon: number): Promise<any[] | null> {
