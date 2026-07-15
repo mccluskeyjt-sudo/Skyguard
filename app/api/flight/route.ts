@@ -191,21 +191,50 @@ async function fetchWeather(lat: number, lon: number): Promise<any[] | null> {
   }
 }
 
-function calcConfidence(
+// Same "rough weather" definition the frontend uses for its weather-alert banner,
+// kept in sync so the score and the UI never disagree about what counts as bad weather.
+function hasRoughWeather(w: { shortForecast?: string; precipChance?: number } | null | undefined): boolean {
+  if (!w) return false
+  const forecast = (w.shortForecast ?? '').toLowerCase()
+  return (w.precipChance ?? 0) > 40
+    || forecast.includes('thunder')
+    || forecast.includes('snow')
+    || forecast.includes('rain')
+}
+
+// Computes risk level and score entirely from real signals — delay, FAA alerts, this
+// aircraft's earlier delays today, and weather. This is deliberately NOT left to the AI to
+// invent: a deterministic score means the same facts always produce the same number, and the
+// number will always match what the summary describes. The AI is only asked to explain this
+// score in plain English, never to make up its own.
+function computeRisk(
   flight: any,
   originFAA: { hasAlert: boolean },
   destFAA:   { hasAlert: boolean },
   avgUpDelay: number,
-  deptDelay = 0
-): number {
-  if (flight.status === 'Cancelled') return 0
+  deptDelay: number,
+  originWeather: any[] | null,
+  destWeather:   any[] | null
+): { score: number; riskLevel: 'low' | 'medium' | 'high' } {
+  if (flight.status === 'Cancelled') return { score: 0, riskLevel: 'high' }
+
   let score = 100
   score -= Math.min(Math.floor(deptDelay / 15) * 5, 35)
   if (flight.status === 'Diverted') score -= 40
   if (originFAA.hasAlert) score -= 20
   if (destFAA.hasAlert)   score -= 10
   score -= Math.min(Math.floor(avgUpDelay / 15) * 3, 15)
-  return Math.max(0, Math.round(score))
+  if (hasRoughWeather(originWeather?.[0])) score -= 12
+  if (hasRoughWeather(destWeather?.[0]))   score -= 8
+  score = Math.max(0, Math.min(100, Math.round(score)))
+
+  const riskLevel: 'low' | 'medium' | 'high' =
+    flight.status === 'Diverted' ? 'high'
+    : score >= 71 ? 'low'
+    : score >= 41 ? 'medium'
+    : 'high'
+
+  return { score, riskLevel }
 }
 
 function validateFlight(raw: string): { ok: boolean; cleaned: string; hint: string } {
@@ -309,6 +338,12 @@ export async function GET(request: NextRequest) {
       ? Math.round(upstream.reduce((a: number, f: any) => a + (f.departure?.delay ?? 0), 0) / upstream.length)
       : 0
 
+    // Risk score is computed here, from real signals, before the AI ever sees the flight —
+    // see computeRisk() for why this isn't left to the AI to invent.
+    const { score: riskScore, riskLevel } = computeRisk(
+      flight, originFAA, destFAA, avgUpstreamDelay, deptDelay, originWeather, destWeather
+    )
+
     // Timing
     const timing = {
       departure: {
@@ -348,7 +383,11 @@ export async function GET(request: NextRequest) {
         }).join('\n')
       : 'No earlier flights found for this aircraft today.'
 
-    const prompt = `You are SkyGuard, an aviation risk analyst. Assess this flight concisely.
+    const prompt = `You are SkyGuard, a flight assistant talking directly to a passenger about their own upcoming trip. Everything you write is read by that passenger, not by airline staff, dispatchers, or operations teams — so never use language they can't act on, like "crew duty time," "block time," "dispatch," "verify compliance," "monitor telemetry," or similar aviation-insider or ops-side terms. Every action you suggest must be something an ordinary traveler can literally do themselves right now: what to check, when to leave, who to call, what to expect at the gate.
+
+SkyGuard has already calculated this flight's risk using real data — delay minutes, FAA alerts, this aircraft's earlier flights today, and weather. Do not invent your own risk level or score. Just explain this one in plain English and tell the passenger what to do about it:
+  Risk level: ${riskLevel}
+  Score: ${riskScore}/100 (100 = smooth trip expected, 0 = serious trouble)
 
 FLIGHT: ${cleaned} on ${date}
 Airline: ${flight.airline?.name ?? 'Unknown'}
@@ -366,16 +405,21 @@ FAA ${destIATA}: ${destFAA.status}
 WEATHER ${originIATA}: ${wxText(originWeather, originIATA)}
 WEATHER ${destIATA}: ${wxText(destWeather, destIATA)}
 
-Respond ONLY with valid JSON (no markdown, no code fences):
+Respond ONLY with valid JSON (no markdown, no code fences), matching this exact shape:
 {
-  "riskLevel": "low" | "medium" | "high",
-  "confidenceScore": number 0-100 consistent with riskLevel (low=71-100, medium=41-70, high=0-40),
-  "summary": "1-2 sentences",
-  "actions": ["action 1", "action 2", "action 3"],
-  "upstreamImpact": "string or null",
-  "weatherImpact": "string or null",
-  "airportAlerts": "string or null"
-}`
+  "summary": string,
+  "actions": string[],
+  "upstreamImpact": string or null,
+  "weatherImpact": string or null,
+  "airportAlerts": string or null
+}
+
+Rules for each field:
+- summary: 1-2 sentences, talking directly to the passenger ("you"), plain English, matching the risk level given above.
+- actions: 2-3 concrete steps the passenger can do themselves. No jargon, no ops-side language.
+- upstreamImpact: plain English, or null if this aircraft's earlier flights today don't add real risk here.
+- weatherImpact: plain English, or null if weather isn't a meaningful factor.
+- airportAlerts: plain English, or null if there are no active FAA alerts affecting this trip.`
 
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
@@ -388,19 +432,21 @@ Respond ONLY with valid JSON (no markdown, no code fences):
     try {
       recommendation = JSON.parse(raw.replace(/```json|```/g, '').trim())
     } catch {
-      const score = calcConfidence(flight, originFAA, destFAA, avgUpstreamDelay, deptDelay)
       recommendation = {
-        riskLevel:      score >= 71 ? 'low' : score >= 41 ? 'medium' : 'high',
-        confidenceScore: score,
-        summary:        'Flight data retrieved but AI analysis incomplete. Check the airline app directly.',
-        actions:        ['Check the airline app for latest updates', 'Arrive with extra time', 'Have airline contact number ready'],
+        summary:        'Flight data retrieved, but we could not generate a full write-up. Check the airline app for the latest updates.',
+        actions:        ['Check the airline app or website for the latest updates', 'Arrive with extra time if you are able', 'Save your airline\'s help-desk number in case you need to rebook'],
         upstreamImpact: null,
         weatherImpact:  null,
         airportAlerts:  null,
       }
     }
 
-    recommendation.walkingMinutes = estimateWalkMinutes(originIATA)
+    // Risk level and score always come from computeRisk(), never from the AI response —
+    // this guarantees the number on screen always matches the summary text, and never
+    // changes between two requests for the exact same flight data.
+    recommendation.riskLevel       = riskLevel
+    recommendation.confidenceScore = riskScore
+    recommendation.walkingMinutes  = estimateWalkMinutes(originIATA)
 
     const derivedStatus = (() => {
       const raw = flight.status ?? 'Unknown'
@@ -423,7 +469,7 @@ Respond ONLY with valid JSON (no markdown, no code fences):
       derivedStatus,
       departureDelayMinutes: deptDelay,
       recommendation,
-      confidenceScore:   recommendation.confidenceScore ?? calcConfidence(flight, originFAA, destFAA, avgUpstreamDelay, deptDelay),
+      confidenceScore:   riskScore,
       departureTerminal: flight.departure?.terminal ?? null,
       departureGate:     flight.departure?.gate ?? flight.departure?.boardingGate ?? flight.departure?.gateNumber ?? null,
       arrivalTerminal:   flight.arrival?.terminal   ?? null,

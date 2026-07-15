@@ -504,7 +504,7 @@ function AircraftPhotoCard({ aircraft, flight }: {
           </p>
         </div>
         <div className="pl-3">
-          <p className="text-xs text-slate-500">Legs today</p>
+          <p className="text-xs text-slate-500">Flights today</p>
           <p className="text-sm font-semibold text-white">{aircraft.totalToday || '—'}</p>
         </div>
       </div>
@@ -569,12 +569,12 @@ function AircraftHistoryCard({ aircraft, airlineName, airlineIata }: {
       {restricted ? (
         <div>
           <p className="text-xs text-slate-500 mb-1 leading-relaxed">
-            {airlineName ?? 'This airline'} restricts tail number sharing with third parties
+            {airlineName ?? 'This airline'} doesn't allow us to show this aircraft's flight history
           </p>
           {aircraft.model && <p className="text-xs text-blue-400">Aircraft: {aircraft.model}</p>}
         </div>
       ) : !aircraft.registration ? (
-        <p className="text-xs text-slate-500">Tail number unavailable</p>
+        <p className="text-xs text-slate-500">Aircraft history unavailable</p>
       ) : aircraft.upstream.length === 0 ? (
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-green-500" />
@@ -1070,7 +1070,7 @@ export default function Home() {
                       color: hasPrecheck ? 'white' : '#64748B',
                     }}
                   >
-                    {hasPrecheck ? 'Pre✓' : 'Std'}
+                    {hasPrecheck ? 'PreCheck' : 'Standard'}
                   </button>
                 </div>
                 <p style={{

@@ -24,7 +24,7 @@ recommendation. No competitor does this.
 - Supabase (configured, reserved for email alerts — not yet active)
 - AeroDataBox Pro via RapidAPI
 - National Weather Service (US airports only)
-- FAA nasstatus.faa.gov
+- FAA ASWS API (soa.smext.faa.gov), nasstatus.faa.gov as fallback
 - Anthropic claude-sonnet-4-6
 - Planespotters.net for aircraft photos
 - TSA wait times (statistical estimate fallback — live API requires paid key)
@@ -47,20 +47,20 @@ recommendation. No competitor does this.
 - AI risk assessment with confidence score via claude-sonnet-4-6
 - Aircraft photo from Planespotters
 - Weather at departure and arrival airports
-- FAA airport alerts with IATA and ICAO dual-format matching
+- FAA airport alerts with IATA and ICAO dual-format matching, three-tier fallback (ASWS →
+  nasstatus → graceful "unavailable" message)
 - TSA wait times with PreCheck toggle
 - Dark premium UI
 - Departure countdown using scheduledISO
+- Leave-by time banner (walk time + security wait + 30 min buffer), visually prominent
 - Data freshness timestamp and quality warning banner
-- Plain English status labels and verdict headlines
+- Plain English status labels and verdict headlines throughout — no aviation jargon
 - Deployed and publicly live
 
 ## Known issues to fix next
 
-- Remove "Live monitoring active" — misleading, we do not poll continuously
-- FAA endpoint returns HTML sometimes — graceful fallback needed
-- Verify leave-by time is calculating correctly and is visually prominent
-- Plain English language pass not fully complete
+- None open — the last bug pass (misleading live-monitoring text, FAA HTML fallback, leave-by
+  time, plain English pass) is complete. Next up is email alerts.
 
 ## Tabled — do not build yet
 
